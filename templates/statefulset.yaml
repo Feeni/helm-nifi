@@ -115,14 +115,23 @@ spec:
 
           cat "${NIFI_HOME}/conf/nifi.temp" > "${NIFI_HOME}/conf/nifi.properties"
 
+          /opt/nifi/nifi-toolkit-current/bin/tls-toolkit.sh standalone -n "${FQDN}" \
+            --clientCertDn "CN=${FQDN}, OU=NIFI" \
+            --certificateAuthorityHostname ${FQDN} \
+            --subjectAlternativeNames 'nifi.k8s.local,localhost' \
+            --keyStorePassword ${KEYSTORE_PASSWORD} \
+            --keyPassword ${KEY_PASSWORD} \
+            --trustStorePassword ${TRUSTSTORE_PASSWORD} \
+            --outputDirectory "${NIFI_HOME}/conf/" \
+            --isOverwrite
+
+          mv ${NIFI_HOME}/conf/${FQDN}/*.jks ${NIFI_HOME}/conf/
+          # rm ${NIFI_HOME}/conf/${FQDN}/nifi.properties
+
           if [[ $(grep $(hostname) conf/authorizers.temp) ]]; then
             cat "${NIFI_HOME}/conf/authorizers.temp" > "${NIFI_HOME}/conf/authorizers.xml"
           else
             cat "${NIFI_HOME}/conf/authorizers.empty" > "${NIFI_HOME}/conf/authorizers.xml"
-          fi
-
-          if ! test -f /opt/nifi/data/flow.xml.gz && test -f /opt/nifi/data/flow.xml; then
-            gzip /opt/nifi/data/flow.xml
           fi
 
           prop_replace nifi.remote.input.host ${FQDN}
@@ -130,11 +139,20 @@ spec:
           prop_replace nifi.web.http.host ${FQDN}
           prop_replace nifi.zookeeper.connect.string ${NIFI_ZOOKEEPER_CONNECT_STRING}
 
+          prop_replace nifi.security.keystorePasswd ${KEYSTORE_PASSWORD}
+          prop_replace nifi.security.keyPasswd ${KEY_PASSWORD}
+          prop_replace nifi.security.truststorePasswd ${TRUSTSTORE_PASSWORD}
+
+
 {{- if .Values.properties.safetyValve }}
   {{- range $prop, $val := .Values.properties.safetyValve }}
           prop_replace {{ $prop }} "{{ $val }}" nifi.properties
   {{- end }}
 {{- end }}
+          echo "NIFIPROPS FULLY DONE - MOEN"
+
+          #This is where we do things
+          cat ${NIFI_HOME}/conf/nifi.properties
 
           exec bin/nifi.sh run & nifi_pid="$!"
 
@@ -228,9 +246,9 @@ spec:
             - |
 {{- if .Values.properties.httpsPort }}
               curl -kv \
-                --cert ${NIFI_BASE_DIR}/data/cert/admin/crt.pem --cert-type PEM \
-                --key ${NIFI_BASE_DIR}/data/cert/admin/key.pem --key-type PEM \
-                https://$(hostname -f):8443/nifi-api/controller/cluster > $NIFI_BASE_DIR/data/cluster.state
+                --cert ${NIFI_HOME}/conf/nifi-cert.pem --cert-type PEM \
+                --key ${NIFI_HOME}/conf/nifi-key.key --key-type PEM \
+                https://$(hostname -f):{{ .Values.properties.httpsPort }}/nifi-api/controller/cluster > $NIFI_BASE_DIR/data/cluster.state
 {{- else }}
               curl -kv \
                 http://$(hostname -f):{{ .Values.properties.httpPort }}/nifi-api/controller/cluster > $NIFI_BASE_DIR/data/cluster.state
